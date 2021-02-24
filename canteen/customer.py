@@ -1,4 +1,13 @@
 from __future__ import annotations
+# This file contains the customers that visit the canteen.
+# Each customer has of course a different arrival time.
+# The arrival of customers could also be more frequent in some busy hours, and
+# less frequent in th most quite times.
+# Customers have also a indicator of how much they are hungry, as well as an
+# index that define their speed.
+#
+# Designed and developed by Mattia Neroni in March 2021.
+# Author contact: mattianeroni@yahoo.it
 
 
 import simpy
@@ -34,7 +43,7 @@ class Customer (object):
 
     def __init__ (self,
                   env : simpy.Environment,
-                  canteen : Canteeen,
+                  canteen : Canteen,
                   arrival : int,
                   speed : int,
                   hungry : int

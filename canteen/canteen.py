@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import simpy
 
 
@@ -18,7 +20,11 @@ class Canteen (simpy.Resource):
                   capacity : int = 100
                   ) -> None:
         """
+        Initialize.
 
+        :param env: The simulation environment.
+        :param opening_time: The time [minutes] that the canteen stays open.
+        :param capacity: The maximum number of customers it can host.
 
         """
         self.opening_time = opening_time
