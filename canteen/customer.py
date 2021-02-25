@@ -23,7 +23,7 @@ class Customer (object):
     An instance of this class represents a customer.
 
     Each customer has (i) an index of speed and (ii) an index of hungriness.
-        (i) The index of speed say how much speed is the customer in the
+        (i) The index of speed say how much fast is the customer in the
             stochastic operations, such as paying or taking food from self
             service stations;
         (ii)The hungriness index says how much the customer wants to eat.
