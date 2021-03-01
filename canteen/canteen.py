@@ -16,13 +16,17 @@ class Canteen (simpy.Resource):
 
     def __init__ (self,
                   env : simpy.Environment,
+                  employees : Tuple[Employee],
+                  stations : Tuple[MultiStore],
                   opening_time : int = 3000,
                   capacity : int = 100
+
                   ) -> None:
         """
         Initialize.
 
         :param env: The simulation environment.
+        
         :param opening_time: The time [minutes] that the canteen stays open.
         :param capacity: The maximum number of customers it can host.
 

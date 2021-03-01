@@ -13,3 +13,14 @@ Event = collections.namedtuple("Event",
                                ("timestamp", "title", "description"),
                                defaults = (0, "Default", None)
                                )
+
+
+
+
+class ResourceError (Exception):
+    """
+    This exception is raised when there is a problem or a mismatch between the moment
+    in which a resource is released, and the moment in which a resource is required.
+
+    """
+    pass

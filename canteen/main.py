@@ -4,23 +4,20 @@ import customer
 
 
 def test (env, store):
-    s.put(3)
-    yield s.get(1)
+    yield env.timeout (1)
+    store.put(store.capacity - store.level)
     print(store.level)
-    w = s.get(1)
-    yield env.timeout(8)
-    yield w
-    print(env.now)
-    print(store.level)
+
+
+
 
 
 
 
 if __name__ == '__main__':
     env = simpy.Environment()
-    c = canteen.Canteen(env)
+    #c = canteen.Canteen(env)
 
-
-    s = simpy.Container(env, capacity=3, init=3)
+    s = simpy.Container(env, capacity=5, init=2)
     env.process(test(env, s))
     env.run()

@@ -3,11 +3,12 @@ from __future__ import annotations
 import simpy
 
 import priority
+import logs
 from employee import Employee
 
 from simpy.resources.container import ContainerPut, ContainerGet
 from simpy.resources.resource import PriorityRequest
-from typing import Tuple, Dict, Optional, Generator, cast
+from typing import Tuple, Dict, Optional, Generator
 
 
 class MultiStore (object):
@@ -28,7 +29,7 @@ class MultiStore (object):
     It basically just have many Container, and sort the requests coming from the
     calling process to the Container containing the product considered.
 
-    """
+    """env, store
 
     def __init__ (self,
                   env : simpy.Environment,
@@ -57,18 +58,26 @@ class MultiStore (object):
                                             }
 
 
+
+
     def get (self, product : str, amount : int) -> ContainerGet:
         """
         This method just sorts the GET requests to the correct product handled
         by the MultiStore.
         The process that calls the GET, also has the responsibility to wait for it.
 
+        NOTE: A problem in the simpy Container must be corrected. When trying to
+        get an amount higher than the current level, the quantity retrieved is
+        accually null. Here the problem (or feature???) is corrected by retrieving
+        the biggest possible amount.
+
         :param product: The name of the product required.
         :param amount: The quatity insert into the MultiStore
         :return: The request to the Container containing the required product.
 
         """
-        return self.containers[product].get(amount)
+        c = self.containers[product]
+        return c.get(min(c.level, amount))
 
 
 
@@ -79,17 +88,107 @@ class MultiStore (object):
         by the MultiStore.
         The process that calls the PUT, also has the responsibility to wait for it.
 
+        NOTE: A problem in the simpy Container must be corrected. When trying to
+        put an amount higher than the remaining space, the quantity put is
+        accually null. Here the problem (or feature???) is corrected by storing
+        the biggest possible amount.
+
         :param product: The name of the product put into the container.
         :param amount: The quatity retrieved by the MultiStore
         :return: The request to the Container containing the required product.
 
         """
-        return self.containers[product].put(amount)
+        c = self.containers[product]
+        return c.put(min(amount, c.capacity - c.level))
+
+
+
+    def level (self, product : str) -> int:
+        """
+        This method just provide the quantity of products inside a specific container.
+
+        :param product: The name of the product of interest.
+        :return: The quantity currently on hand of that product.
+
+        """
+        return self.containers[product].level
 
 
 
 
-class ProductiveStation (MultiStore):
+class ResourceManager (object):
+    """
+    This class is mainly made for inheritance and not for instantiation.
+    It contains some methods and attributes usefull to get a resource (or employee)
+    from a set of many. It basically sends the a request to each resource, and
+    than wait until one gets free. In case a resource is already busy, it just make
+    a further request to that resource using a extraordaniray priority, to avoid the
+    resource to escape for doing something else.
+
+    """
+    def __init__ (self, env : simpy.Environment, employees : Tuple[Employee]) -> None:
+        """
+        Initialize.
+
+        :param env: The simulation environment.
+        :param employees: The pool of employees from which the station can take.
+
+        """
+        self.env = env
+        self.employees = employees
+        self.current_request : Optional[PriorityRequest] = None
+
+
+    def getResource (self, priority_level : int) -> Generator[simpy.Event, None, None]:
+        """
+        This method get a resource.
+        It basically sends the a request to each resource, and than wait until one
+        gets free. In case a resource is already busy, itenv, store just make a further request
+        to that resource using a extraordaniray priority, to avoid the resource to
+        escape for doing something else.
+
+        :param priority_level: The priority level.
+
+        """
+        req : PriorityRequest
+        employee : Employee
+
+        if not self.current_request:
+            # Make a request to all the employees
+            requests = [employee.request(priority=priority_level, preempt = False) for employee in self.employees]
+            # Wait for the first one to be free
+            condition_value = yield self.env.any_of(requests)
+            # Get the winner request and the relative employee
+            req = condition_value.events[0] # type: ignore
+            employee = req.resource                # type: ignore
+            self.current_request = req
+            # Delete other requests
+            # !NOTE! The winner is not cancelled because already triggered
+            [r.cancel() for r in requests] # type: ignore
+        else:
+            # If an empoyee is already working in this station, wait for him/her to
+            # be free, sending him an extraordinary request.
+            req = employee.request(priority=priority.EXTRAORDINARY, preempt = False)
+            yield req
+            self.current_request = req
+
+
+    def releaseResource (self) -> None:
+        """
+        This method just release the resource occupied by the current_request.
+
+        """
+        if self.current_request is None:
+            raise logs.ResourceError("The resource released was never required")
+
+        employee = self.current_request.resource
+        employee.release (self.current_request)
+        self.current_request = None
+
+
+
+
+class ProductiveStation (MultiStore, ResourceManager):
     """
     An instance of this class represents a productive station of the canteen.
     A productive station is a station where the food is cooked, before bringing
@@ -135,80 +234,105 @@ class ProductiveStation (MultiStore):
                      when the food is ready. By default it is false.
 
         """
-        super(ProductiveStation, self).__init__(env, products, capacities, tuple([0]*len(capacities)))
-        self.employees = employees
+        MultiStore.__init__(env, products, capacities, tuple([0]*len(capacities)))
+        ResourceManager.__init__(env, employees)
+
         self.production_times : Dict[str, int] = {p : k for p, k in zip (products, production_times)}
         self.preparation_times : Dict[str, int] = {p : k for p, k in zip(products, preparation_times)}
 
         keep = keep or tuple([False] * len(products))
         self.keep : Dict[str, bool] = {p : k for p, k in zip(products, keep)}
 
-        self.current_request : Optional[PriorityRequest] = None
+
+
 
 
     def work (self,
               product : str,
-              priority_level : int = priority.NORMAL
-            ) -> Generator[simpy.Event, None, None]:
+              priority_level : int = priority.NORMAL,
+              service_station : Optional[MultiStore] = None
+
+              ) -> Generator[simpy.Event, None, None]:
         """
+        This method is used by the ProductiveStation to prepare / cook a certain product.
+        To this is given a certain priority that will depend on the necessity
+        by the respective ServiceStation to refill. It is possible to require
+        an immediate refilling after the production process by giving to the method
+        the reference to the ServiceStation as argument.
+        
+        The resource required by the process is first resulting available with
+        respect to the resource pool involved. In case a resource is already working
+        on the station, that specific resource is used sending him/her a EXTRAORDINARY
+        request with priority on everithing else.
 
 
         :param product: The troduct to be cooked.
         :param priority_level: The priority given to the need for an employee. The higher is the
                                priority value the less is the hurry to complete the operation.
+        :param service_station: The service station for which the ProductiveStation
+                                is producing. It is served as soon as the production
+                                is concluded.
 
         """
         env = self.env
         capacity = self.capacities[product]
-        prod_time, prep_time = self.production_times[product], self.preparation_times[product]
-        # Make a request to all the employees
-        requests = [employee.request(priority=priority_level, preempt = False) for employee in self.employees]
-        # Wait for the first one to be free
-        condition_value = yield env.any_of(requests)
-        # Get the winner request and the relative employee
-        req : PriorityRequest = condition_value.events[0] # type: ignore
-        employee : Employee = req.resource                # type: ignore
-        # Delete other requests
-        # !NOTE! The winner is not cancelled because already triggered
-        [r.cancel() for r in requests] # type: ignore
+        prod_time = self.production_times[product]
+        prep_time = self.preparation_times[product]
+        # Wait for a resource
+        yield env.process(self.getResource(priority_level))
+        req : PriorityRequest = self.current_request
+        employee : Employee = req.resource
+
         # Prepare everything
         yield env.timeout(prep_time)
         # If the employee is not needed its released
         if not self.keep[product]:
-            employee.release (req)
+            self.releaseResource()
         # Produce
         yield env.timeout(prod_time)
         self.put(product, capacity)
-        # Release the resource used
-        employee.release (req)
-        self.current_request = None
+
+        # Eventually ask to the current occupied resource to take care of the downloading
+        # operations before being released.
+        if service_station:
+            env.process (self.serve(service_station, product, priority_level))
+
+        # Release the resource eventually used for working
+        if self.keep[product]:
+            self.releaseResource()
+
 
 
     def serve (self,
                service_station : MultiStore,
                product : str,
-               priority_level : int = priority.URGENT
+               priority_level : int = priority.MEDIUM
             ) -> Generator[simpy.Event, None, None]:
         """
+        This method is used by the ProductiveStation to refill a specific ServiceStation.
+
+        The resource required by the process is first resulting available with
+        respect to the resource pool involved. In case a resource is already working
+        on the station, that specific resource is used sending him/her a EXTRAORDINARY
+        request with priority on everithing else.
+
+        NOTE: By default the priority level of this process is higher than the priority
+        of the production process, because, usually, when the food is ready must
+        by removed from the production station as soon as possible. The risk could be
+        to burn it.
+
+        :param service_station: The service station to refill.
+        :param product: The interested product.
+        :param priority_level: The priority level of the request.
 
         """
-        # If there are no employees already working on this ProductiveStation
-        # we look for another one.
-        if not self.current_request:
-            # Make a request to all the employees
-            requests = [employee.request(priority = priority_level, preempt = False) for employee in self.employees]
-            # Wait for the first one to be free
-            condition_value = yield env.any_of(requests)
-            # Get the winner request and the relative employee
-            req = condition_value.events[0]     # type: ignore
-            employee = req.resource             # type: ignore
+        # Wait for a resource
+        yield env.process(self.getResource(priority_level))
+        req : PriorityRequest = self.current_request
+        employee : Employee = req.resource
 
         # Conclude and release the employee
         capacity = self.capacities[product]
         self.get(product, capacity)
         service_station.put(product, capacity)
-        employee.release (req)
-
-
-
-        #
+        self.releaseResource()
