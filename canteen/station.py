@@ -29,7 +29,7 @@ class MultiStore (object):
     It basically just have many Container, and sort the requests coming from the
     calling process to the Container containing the product considered.
 
-    """env, store
+    """
 
     def __init__ (self,
                   env : simpy.Environment,
@@ -111,7 +111,7 @@ class MultiStore (object):
         :return: The quantity currently on hand of that product.
 
         """
-        return self.containers[product].level
+        return int(self.containers[product].level)
 
 
 
@@ -126,7 +126,7 @@ class ResourceManager (object):
     resource to escape for doing something else.
 
     """
-    def __init__ (self, env : simpy.Environment, employees : Tuple[Employee]) -> None:
+    def __init__ (self, env : simpy.Environment, employees : Tuple[Employee,...]) -> None:
         """
         Initialize.
 
@@ -234,8 +234,10 @@ class ProductiveStation (MultiStore, ResourceManager):
                      when the food is ready. By default it is false.
 
         """
-        MultiStore.__init__(env, products, capacities, tuple([0]*len(capacities)))
-        ResourceManager.__init__(env, employees)
+        MultiStore.__init__(self, env, products, capacities, tuple([0]*len(capacities)))
+        ResourceManager.__init__(self, env, employees)
+
+        self.env = env
 
         self.production_times : Dict[str, int] = {p : k for p, k in zip (products, production_times)}
         self.preparation_times : Dict[str, int] = {p : k for p, k in zip(products, preparation_times)}
@@ -259,7 +261,7 @@ class ProductiveStation (MultiStore, ResourceManager):
         by the respective ServiceStation to refill. It is possible to require
         an immediate refilling after the production process by giving to the method
         the reference to the ServiceStation as argument.
-        
+
         The resource required by the process is first resulting available with
         respect to the resource pool involved. In case a resource is already working
         on the station, that specific resource is used sending him/her a EXTRAORDINARY
@@ -280,8 +282,8 @@ class ProductiveStation (MultiStore, ResourceManager):
         prep_time = self.preparation_times[product]
         # Wait for a resource
         yield env.process(self.getResource(priority_level))
-        req : PriorityRequest = self.current_request
-        employee : Employee = req.resource
+        req : PriorityRequest = self.current_request        # type: ignore
+        employee : Employee = req.resource                  # type: ignore
 
         # Prepare everything
         yield env.timeout(prep_time)
@@ -300,7 +302,6 @@ class ProductiveStation (MultiStore, ResourceManager):
         # Release the resource eventually used for working
         if self.keep[product]:
             self.releaseResource()
-
 
 
     def serve (self,
@@ -327,12 +328,65 @@ class ProductiveStation (MultiStore, ResourceManager):
 
         """
         # Wait for a resource
-        yield env.process(self.getResource(priority_level))
-        req : PriorityRequest = self.current_request
-        employee : Employee = req.resource
+        yield self.env.process(self.getResource(priority_level))
+        req : PriorityRequest = self.current_request    # type: ignore
+        employee : Employee = req.resource              # type: ignore
+
+        # Refill the service station
+        yield self.env.timeout(5)
 
         # Conclude and release the employee
         capacity = self.capacities[product]
         self.get(product, capacity)
         service_station.put(product, capacity)
         self.releaseResource()
+
+
+
+class SelfServiceStation (MultiStore):
+    """
+    An instance of this class represents a self service station, in which the
+    customers can be served without requiring an employee. However, when the
+    station is empty or the quantity is under a certain level, it requires
+    to the respective ProductiveStation to produce the missing product.
+
+    The production of course takes time and need an employee, but also the service
+    of customers and the refilling at the SelfServiceStation take time, and this
+    time depends on the energy and experience of the employee involved.
+
+    """
+
+    def __init__ (self,
+                  env : simpy.Environment,
+                  supplier : ProductiveStation,
+                  products : Tuple[str, ...],
+                  capacities : Tuple[int, ...],
+                  service_times : Tuple[int, ...],
+                  refilling_times : Tuple[int, ...],
+                  reorder_levels : Optional[Tuple[int,...]] = None
+
+                ) -> None:
+        """
+        Initialize.
+
+        :param env: The simulation environment.
+        :param supplier: The respective productive station.
+        :param products: The handled products.
+        :param capacities: The maximum quantity that can be stored for each product.
+        :param service_times: The average times needed to serve a customer with
+                              each of the handled products.
+        :param refilling_times: The average times needed to serve a customer with
+                                each of the handled products.
+        :param reorder_levels: The reorder level per each handled product.
+
+        """
+        super (SelfServiceStation, self).__init__(env, products, capacities, init=capacities)
+
+        self.env = env
+        self.supplier = supplier
+
+        self.service_times : Dict[str, int] = {p : k for p, k in zip (products, service_times)}
+        self.refilling_times : Dict[str, int] = {p : k for p, k in zip(products, refilling_times)}
+
+        reorder_levels = reorder_levels or tuple(0 for _ in products)
+        self.reorder_levels = {p : k for p, k in zip(products, reorder_levels)}
