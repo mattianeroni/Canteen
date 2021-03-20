@@ -5,10 +5,12 @@ import simpy
 import priority
 import logs
 from employee import Employee
+from customer import Customer
 
 from simpy.resources.container import ContainerPut, ContainerGet
 from simpy.resources.resource import PriorityRequest
-from typing import Tuple, Dict, Optional, Generator
+
+from typing import Tuple, Dict, Optional, Generator, Union
 
 
 class MultiStore (object):
@@ -61,6 +63,7 @@ class MultiStore (object):
 
 
     def get (self, product : str, amount : int) -> ContainerGet:
+
         """
         This method just sorts the GET requests to the correct product handled
         by the MultiStore.
@@ -251,8 +254,9 @@ class ProductiveStation (MultiStore, ResourceManager):
 
     def work (self,
               product : str,
-              priority_level : int = priority.NORMAL,
-              service_station : Optional[MultiStore] = None
+              service_station : Union[ServiceStation, SelfServiceStation],
+              production_priority : int = priority.NORMAL,
+              service_priority : int = priority.MEDIUM
 
               ) -> Generator[simpy.Event, None, None]:
         """
@@ -268,12 +272,16 @@ class ProductiveStation (MultiStore, ResourceManager):
         request with priority on everithing else.
 
 
-        :param product: The troduct to be cooked.
-        :param priority_level: The priority given to the need for an employee. The higher is the
-                               priority value the less is the hurry to complete the operation.
+        :param product: The product to be cooked.
         :param service_station: The service station for which the ProductiveStation
                                 is producing. It is served as soon as the production
                                 is concluded.
+        :param production_priority: The priority given to the need for an employee
+                                    for the production phase.
+        :param service_priority: The priority given to the need for an employee for
+                                 the service phase. This priority level is higher than
+                                 the production_priority to avoid the risk to burn the
+                                 food.
 
         """
         env = self.env
@@ -281,7 +289,7 @@ class ProductiveStation (MultiStore, ResourceManager):
         prod_time = self.production_times[product]
         prep_time = self.preparation_times[product]
         # Wait for a resource
-        yield env.process(self.getResource(priority_level))
+        yield env.process(self.getResource(production_priority))
         req : PriorityRequest = self.current_request        # type: ignore
         employee : Employee = req.resource                  # type: ignore
 
@@ -294,51 +302,20 @@ class ProductiveStation (MultiStore, ResourceManager):
         yield env.timeout(prod_time)
         self.put(product, capacity)
 
-        # Eventually ask to the current occupied resource to take care of the downloading
-        # operations before being released.
-        if service_station:
-            env.process (self.serve(service_station, product, priority_level))
-
-        # Release the resource eventually used for working
-        if self.keep[product]:
-            self.releaseResource()
-
-
-    def serve (self,
-               service_station : MultiStore,
-               product : str,
-               priority_level : int = priority.MEDIUM
-            ) -> Generator[simpy.Event, None, None]:
-        """
-        This method is used by the ProductiveStation to refill a specific ServiceStation.
-
-        The resource required by the process is first resulting available with
-        respect to the resource pool involved. In case a resource is already working
-        on the station, that specific resource is used sending him/her a EXTRAORDINARY
-        request with priority on everithing else.
-
-        NOTE: By default the priority level of this process is higher than the priority
-        of the production process, because, usually, when the food is ready must
-        by removed from the production station as soon as possible. The risk could be
-        to burn it.
-
-        :param service_station: The service station to refill.
-        :param product: The interested product.
-        :param priority_level: The priority level of the request.
-
-        """
-        # Wait for a resource
-        yield self.env.process(self.getResource(priority_level))
-        req : PriorityRequest = self.current_request    # type: ignore
-        employee : Employee = req.resource              # type: ignore
+        # If the resource has been released for the production, a new one is rquired
+        if not self.keep[product]:
+            yield self.env.process(self.getResource(priority.MEDIUM))
+            req = self.current_request           # type: ignore
+            employee = req.resource              # type: ignore
 
         # Refill the service station
-        yield self.env.timeout(5)
+        yield self.env.timeout(service_station.refilling_times[product])
 
         # Conclude and release the employee
         capacity = self.capacities[product]
         self.get(product, capacity)
         service_station.put(product, capacity)
+        service_station.waiting_refill = False
         self.releaseResource()
 
 
@@ -352,7 +329,14 @@ class SelfServiceStation (MultiStore):
 
     The production of course takes time and need an employee, but also the service
     of customers and the refilling at the SelfServiceStation take time, and this
-    time depends on the energy and experience of the employee involved.
+    time depends on:
+            -   The energy of the employee involved
+            -   The experience of the employee involved
+            -   The the refilled product
+
+    The service of the customer on the other hand depends on:
+            -   The speed of the customer
+            -   The refilled product
 
     """
 
@@ -384,9 +368,144 @@ class SelfServiceStation (MultiStore):
 
         self.env = env
         self.supplier = supplier
+        self.waiting_refill : bool = False
 
         self.service_times : Dict[str, int] = {p : k for p, k in zip (products, service_times)}
         self.refilling_times : Dict[str, int] = {p : k for p, k in zip(products, refilling_times)}
 
         reorder_levels = reorder_levels or tuple(0 for _ in products)
         self.reorder_levels = {p : k for p, k in zip(products, reorder_levels)}
+
+
+
+    def serve (self, customer : Customer, product : str) -> Generator[simpy.Event, None, None]:
+        """
+        This process is used to serve a customer at this station.
+        First, the customer is served waiting for the availability of the product and
+        the service time, which depends on the speed of the customer and the product.
+        Then, if the quantity remained if less than a predefined reorder level and
+        the station is not already waiting for a refill, a new production is required.
+
+        When the qantity of the product required is finished, the customers will
+        have to wait until the station has been refilled.
+
+        The activity carried out by the "supplier" (the productive station that
+        replenish this service station) can be divided in two phases:
+                -   the work (i.e., preparation of food)
+                -   the service (i.e., the replenishment of the service station)
+        Currently these phases are made together because of the risk to burn the food.
+        In the future, they might be splitted.
+
+        :param customer: The customer served.
+        :param product: The product required by the customer.
+
+        """
+        yield self.get(product, 1)
+        yield self.env.timeout(self.service_times[product])
+        if self.level(product) <= self.reorder_levels[product] and not self.waiting_refill:
+            self.waiting_refill = True
+            self.env.process(self.supplier.work(product, self, priority.NORMAL, priority.MEDIUM))
+
+
+
+
+
+
+class ServiceStation (MultiStore, ResourceManager):
+    """
+    An instance of this class represents a service station, in which the
+    customers are served by an employee.
+
+    When the station is empty or the quantity is under a certain level, it requires
+    the respective ProductiveStation to produce the missing product.
+
+    The production of course takes time and need an employee, but also the service
+    of customers and the refilling at the SelfServiceStation take time, and this
+    time depends on:
+            -   The energy of the employee involved
+            -   The experience of the employee involved
+            -   The the refilled product
+
+    The service of the customer on the other hand has a duration that depends on:
+            -   The product served
+            -   The experience of the employee
+            -   The energy of the employee
+            -   The speed of the customer
+
+
+    """
+
+    def __init__ (self,
+                  env : simpy.Environment,
+                  employees : Tuple[Employee,...],
+                  supplier : ProductiveStation,
+                  products : Tuple[str, ...],
+                  capacities : Tuple[int, ...],
+                  service_times : Tuple[int, ...],
+                  refilling_times : Tuple[int, ...],
+                  reorder_levels : Optional[Tuple[int,...]] = None
+
+                ) -> None:
+        """
+        Initialize.
+
+        :param env: The simulation environment.
+        :param employees: The employees that can work on this station.
+        :param supplier: The respective productive station.
+        :param products: The handled products.
+        :param capacities: The maximum quantity that can be stored for each product.
+        :param service_times: The average times needed to serve a customer with
+                              each of the handled products.
+        :param refilling_times: The average times needed to serve a customer with
+                                each of the handled products.
+        :param reorder_levels: The reorder level per each handled product.
+
+        """
+        MultiStore.__init__(self, env, products, capacities, init=capacities)
+        ResourceManager.__init__(self, env, employees)
+
+        self.env = env
+        self.supplier = supplier
+        self.waiting_refill : bool = False
+
+        self.service_times : Dict[str, int] = {p : k for p, k in zip (products, service_times)}
+        self.refilling_times : Dict[str, int] = {p : k for p, k in zip(products, refilling_times)}
+
+        reorder_levels = reorder_levels or tuple(0 for _ in products)
+        self.reorder_levels = {p : k for p, k in zip(products, reorder_levels)}
+
+
+    def serve (self,
+               customer : Customer,
+               product : str,
+               priority_level : int = priority.NORMAL
+
+            ) -> Generator[simpy.Event, None, None]:
+        """
+        This process is used to serve a customer at this station.
+        First, the customer is served waiting for the availability of the product and
+        the service time, which depends on the speed of the customer and the product.
+        Then, if the quantity remained if less than a predefined reorder level and
+        the station is not already waiting for a refill, a new production is required.
+
+        In order to serve the customer a resource is required. This is the only
+        aspect that makes this type of station different from a SelfServiceStation.
+
+        :param customer: The customer served.
+        :param product: The product required by the customer.
+
+        """
+        # Get the product to serve to the customer
+        yield self.get(product, 1)
+        # Wait for a resource
+        yield self.env.process(self.getResource(priority_level))
+        req : PriorityRequest = self.current_request        # type: ignore
+        employee : Employee = req.resource                  # type: ignore
+        # Serve the customer
+        yield self.env.timeout(self.service_times[product])
+        # Release the resource
+        self.releaseResource()
+        # If needed, ask a new production to the respective ProductiveStation
+        if self.level(product) <= self.reorder_levels[product] and not self.waiting_refill:
+            self.waiting_refill = True
+            self.env.process(self.supplier.work(product, self, priority.NORMAL, priority.MEDIUM))

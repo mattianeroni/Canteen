@@ -4,8 +4,8 @@ import customer
 
 
 def test (env, store):
-    yield env.timeout (1)
-    store.put(store.capacity - store.level)
+    #yield env.timeout (1)
+    yield store.put(5)
     print(store.level)
 
 
@@ -20,4 +20,4 @@ if __name__ == '__main__':
 
     s = simpy.Container(env, capacity=5, init=2)
     env.process(test(env, s))
-    env.run()
+    env.run(until=100)

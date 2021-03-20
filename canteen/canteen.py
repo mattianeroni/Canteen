@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import simpy
 
+from employee import Employee
+from station import MultiStore
+from typing import Tuple
+
 
 class Canteen (simpy.Resource):
     """
@@ -26,7 +30,7 @@ class Canteen (simpy.Resource):
         Initialize.
 
         :param env: The simulation environment.
-        
+
         :param opening_time: The time [minutes] that the canteen stays open.
         :param capacity: The maximum number of customers it can host.
 

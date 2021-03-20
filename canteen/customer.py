@@ -11,10 +11,61 @@ from __future__ import annotations
 
 
 import simpy
-from typing import Dict, Optional, Tuple, List
+import random
+from typing import Optional, Tuple, List, Callable
 
 import logs
 from canteen import Canteen
+
+
+# These are the possible menus the customers select from depending on
+# on how much they are hungry.
+# The sequences can be read in the following way:
+#        (starter, pizza, first, second, side, sweet, drink)
+_menu = {
+    0 : ((1,0,0,0,0,0,1), (0,0,0,0,1,0,1)),
+    1 : ((0,0,1,0,0,0,1), (0,0,0,1,0,0,1)),
+    2 : ((1,0,1,0,0,0,1), (1,0,0,1,0,0,1), (0,1,0,0,0,0,1), (0,0,0,1,1,0,1), (0,0,1,0,1,0,1)),
+    3 : ((0,1,0,0,0,0,1), (0,1,0,0,0,1,1), (0,0,1,1,0,0,1), (0,1,0,0,1,0,1), (1,0,1,0,0,1,1), (1,0,0,1,1,0,1)),
+    4 : ((0,1,0,0,1,0,1), (0,1,0,0,0,1,1), (0,0,1,1,1,0,1), (0,0,1,1,0,1,1), (1,0,1,0,1,0,1), (1,0,1,0,1,1,1)),
+    5 : ((0,1,0,0,1,1,1), (1,1,0,0,0,1,1), (1,0,1,1,1,0,1), (1,0,1,1,1,1,1))
+}
+
+
+
+def source (arrivalFunction : Callable[[float], float],
+            maxtime : int,
+            env : simpy.Environment,
+            canteen : Canteen
+
+            ) -> Tuple[Customer,...]:
+    """
+    This method generates the customers.
+    The callable arrivalFunction defines how the interarrivals change during the
+    simulation. This aspect offers a great flexibility and allows the simulation
+    of constant arrivals as well as busiest moments.
+
+    :param arrivalFunction: The function that describes the interarrivals.
+    :param maxtime: The duration of the simulation.
+    :param env: The simulation environment.
+    :param canteen: The canteen.
+
+    :return: The set of customers that are going to enter the canteen.
+
+    """
+    customers = list()
+    arrival = 0.0
+    while arrival < maxtime:
+        hungry = random.randint (0, 5)
+        menu = random.choice (_menu[hungry])
+        speed = random.randint (0, 10)
+        customers.append(Customer(env, canteen, int(arrival), speed, hungry, menu))
+
+        # Consider using += expovariate(1/arrivalFunction(arrival))
+        # for a major variability and a more stochastic behaviour
+        arrival += arrivalFunction(arrival)
+
+    return tuple(customers)
 
 
 
@@ -46,7 +97,8 @@ class Customer (object):
                   canteen : Canteen,
                   arrival : int,
                   speed : int,
-                  hungry : int
+                  hungry : int,
+                  menu : Tuple[int,...]
                   ) -> None:
         """
         Initialize.
@@ -57,6 +109,7 @@ class Customer (object):
         :param speed: An index that indicate how fast is the customer in the operations
                     such as self-service and paying.
         :param hungry: An index that says how much hungry is the customers.
+        :param menu: The menu the customer will choose.
 
         :attr exit: When the customer exists the canteen.
         :attr history: All the events and relative timestamps that concern the
@@ -67,6 +120,7 @@ class Customer (object):
         self.canteen = canteen
         self.speed = speed
         self.hungry = hungry
+        self.menu = menu
 
         self.arrival = arrival
         self.exit : Optional[int] = None
