@@ -162,8 +162,8 @@ class ResourceManager (object):
             # Wait for the first one to be free
             condition_value = yield self.env.any_of(requests)
             # Get the winner request and the relative employee
-            req = condition_value.events[0] # type: ignore
-            employee = req.resource                # type: ignore
+            req = condition_value.events[0]         # type: ignore
+            employee = req.resource                 # type: ignore
             self.current_request = req
             # Delete other requests
             # !NOTE! The winner is not cancelled because already triggered
@@ -218,8 +218,8 @@ class ProductiveStation (MultiStore, ResourceManager):
                   employees : Tuple[Employee,...],
                   products : Tuple[str,...],
                   capacities : Tuple[int,...],
-                  production_times : Tuple[int,...],
-                  preparation_times : Tuple[int,...],
+                  production_times : Tuple[float,...],
+                  preparation_times : Tuple[float,...],
                   keep : Optional[Tuple[bool, ...]] = None
                 ) -> None:
         """
@@ -242,8 +242,8 @@ class ProductiveStation (MultiStore, ResourceManager):
 
         self.env = env
 
-        self.production_times : Dict[str, int] = {p : k for p, k in zip (products, production_times)}
-        self.preparation_times : Dict[str, int] = {p : k for p, k in zip(products, preparation_times)}
+        self.production_times : Dict[str, float] = {p : k for p, k in zip (products, production_times)}
+        self.preparation_times : Dict[str, float] = {p : k for p, k in zip(products, preparation_times)}
 
         keep = keep or tuple([False] * len(products))
         self.keep : Dict[str, bool] = {p : k for p, k in zip(products, keep)}
@@ -285,14 +285,16 @@ class ProductiveStation (MultiStore, ResourceManager):
 
         """
         env = self.env
-        capacity = self.capacities[product]
-        prod_time = self.production_times[product]
-        prep_time = self.preparation_times[product]
         # Wait for a resource
         yield env.process(self.getResource(production_priority))
         req : PriorityRequest = self.current_request        # type: ignore
         employee : Employee = req.resource                  # type: ignore
 
+        # Define waiting times
+        penalty = employee.energy_penalty + employee.experience_penalty
+        capacity = self.capacities[product]
+        prod_time = self.production_times[product] * (1.0 + penalty)
+        prep_time = self.preparation_times[product] * (1.0 + penalty)
         # Prepare everything
         yield env.timeout(prep_time)
         # If the employee is not needed its released
@@ -301,6 +303,8 @@ class ProductiveStation (MultiStore, ResourceManager):
         # Produce
         yield env.timeout(prod_time)
         self.put(product, capacity)
+        # Reduce employee's energy
+        employee.energy -= 1
 
         # If the resource has been released for the production, a new one is rquired
         if not self.keep[product]:
@@ -309,10 +313,12 @@ class ProductiveStation (MultiStore, ResourceManager):
             employee = req.resource              # type: ignore
 
         # Refill the service station
-        yield self.env.timeout(service_station.refilling_times[product])
+        penalty = employee.energy_penalty + employee.experience_penalty
+        yield self.env.timeout(service_station.refilling_times[product] * (1.0 + penalty))
+        # Reduce employee's energy
+        employee.energy -= 1
 
         # Conclude and release the employee
-        capacity = self.capacities[product]
         self.get(product, capacity)
         service_station.put(product, capacity)
         service_station.waiting_refill = False
@@ -345,8 +351,8 @@ class SelfServiceStation (MultiStore):
                   supplier : ProductiveStation,
                   products : Tuple[str, ...],
                   capacities : Tuple[int, ...],
-                  service_times : Tuple[int, ...],
-                  refilling_times : Tuple[int, ...],
+                  service_times : Tuple[float, ...],
+                  refilling_times : Tuple[float, ...],
                   reorder_levels : Optional[Tuple[int,...]] = None
 
                 ) -> None:
@@ -370,8 +376,8 @@ class SelfServiceStation (MultiStore):
         self.supplier = supplier
         self.waiting_refill : bool = False
 
-        self.service_times : Dict[str, int] = {p : k for p, k in zip (products, service_times)}
-        self.refilling_times : Dict[str, int] = {p : k for p, k in zip(products, refilling_times)}
+        self.service_times : Dict[str, float] = {p : k for p, k in zip (products, service_times)}
+        self.refilling_times : Dict[str, float] = {p : k for p, k in zip(products, refilling_times)}
 
         reorder_levels = reorder_levels or tuple(0 for _ in products)
         self.reorder_levels = {p : k for p, k in zip(products, reorder_levels)}
@@ -401,7 +407,7 @@ class SelfServiceStation (MultiStore):
 
         """
         yield self.get(product, 1)
-        yield self.env.timeout(self.service_times[product])
+        yield self.env.timeout(self.service_times[product] * (1.0 + customer.speed_penalty))
         if self.level(product) <= self.reorder_levels[product] and not self.waiting_refill:
             self.waiting_refill = True
             self.env.process(self.supplier.work(product, self, priority.NORMAL, priority.MEDIUM))
@@ -441,8 +447,8 @@ class ServiceStation (MultiStore, ResourceManager):
                   supplier : ProductiveStation,
                   products : Tuple[str, ...],
                   capacities : Tuple[int, ...],
-                  service_times : Tuple[int, ...],
-                  refilling_times : Tuple[int, ...],
+                  service_times : Tuple[float, ...],
+                  refilling_times : Tuple[float, ...],
                   reorder_levels : Optional[Tuple[int,...]] = None
 
                 ) -> None:
@@ -468,8 +474,8 @@ class ServiceStation (MultiStore, ResourceManager):
         self.supplier = supplier
         self.waiting_refill : bool = False
 
-        self.service_times : Dict[str, int] = {p : k for p, k in zip (products, service_times)}
-        self.refilling_times : Dict[str, int] = {p : k for p, k in zip(products, refilling_times)}
+        self.service_times : Dict[str, float] = {p : k for p, k in zip (products, service_times)}
+        self.refilling_times : Dict[str, float] = {p : k for p, k in zip(products, refilling_times)}
 
         reorder_levels = reorder_levels or tuple(0 for _ in products)
         self.reorder_levels = {p : k for p, k in zip(products, reorder_levels)}
@@ -502,10 +508,58 @@ class ServiceStation (MultiStore, ResourceManager):
         req : PriorityRequest = self.current_request        # type: ignore
         employee : Employee = req.resource                  # type: ignore
         # Serve the customer
-        yield self.env.timeout(self.service_times[product])
+        penalty = customer.speed_penalty + employee.energy_penalty + employee.experience_penalty
+        yield self.env.timeout(self.service_times[product] * (1.0 + penalty))
+        # Decrease the energy of the employee
+        employee.energy -= 1
         # Release the resource
         self.releaseResource()
         # If needed, ask a new production to the respective ProductiveStation
         if self.level(product) <= self.reorder_levels[product] and not self.waiting_refill:
             self.waiting_refill = True
             self.env.process(self.supplier.work(product, self, priority.NORMAL, priority.MEDIUM))
+
+
+
+
+
+
+class Cash (simpy.Resource):
+    """
+    An instance of this class represents the cash point where the customers pay.
+    Usually this station is different by the others because it requires an employee
+    who is not shered, he/she works full time in this station.
+
+    """
+    def __init__ (self,
+                  env : simpy.Environment,
+                  payTime : float,
+                  energy : int = 100,
+                  capacity : int = 1
+
+                ) -> None:
+        """
+        Initialize.
+
+        :param env: The simulation environment
+        :param payTime: The standard average time needed to pay.
+        :param energy: The energy of the employee at the beginning of the simulation.
+        :param capacity: The number of cash points.
+
+        """
+        self.env = env
+        self.payTime = payTime
+        self.employee = Employee(env, 2, energy)
+
+        super(Cash, self).__init__ (env, capacity=capacity)
+
+
+    def pay (self, customer : Customer) -> Generator[simpy.Event,None,None]:
+        """
+        This method represents the payment process, whose duration depends on the
+        energy of the employee and the speed of the customer.
+
+        """
+        penalty = customer.speed_penalty + self.employee.energy_penalty
+        self.employee.energy -= 1
+        yield self.env.timeout(self.payTime * (1.0 + penalty))   # Use lognorm distribution for higher variability

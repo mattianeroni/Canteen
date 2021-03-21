@@ -8,7 +8,24 @@ from __future__ import annotations
 # Author contact: mattianeroni@yahoo.it
 
 import simpy
-from typing import Callable, Tuple
+import math
+from typing import Tuple
+
+
+
+def source (*experiences : int, env : simpy.Environment) -> Tuple[Employee,...]:
+    """
+    This method allows a faster generation of the employees who work in the canteen.
+
+    :param experiences: The experience level (a value between 1 and 3) of each employee.
+    :param env: The simulation environment.
+
+    :return: The set of employee.
+
+    """
+    return tuple(Employee(env, e, 100.0) for e in experiences)
+
+
 
 
 class Employee (simpy.PriorityResource):
@@ -46,3 +63,22 @@ class Employee (simpy.PriorityResource):
         self.energy = energy
 
         super(Employee, self).__init__(env, capacity=1)
+
+
+    @property
+    def energy_penalty (self) -> float:
+        """
+        The time penalty applied to the operations carried out by this employee
+        because of his/her current energy.
+
+        """
+        return math.log(101.0 - self.energy) * 0.05
+
+
+    @property
+    def experience_penalty (self) -> float:
+        """
+        The time penalty applied to the operations carried out by this employee
+        because of his/her current experience.
+        """
+        return 0.2 - (self.experience - 1)*0.2

@@ -22,8 +22,8 @@ class Canteen (simpy.Resource):
                   env : simpy.Environment,
                   employees : Tuple[Employee],
                   stations : Tuple[MultiStore],
-                  opening_time : int = 3000,
-                  capacity : int = 100
+                  opening_time : float = 300.0,
+                  capacity : int = 20
 
                   ) -> None:
         """

@@ -33,6 +33,18 @@ _menu = {
 
 
 
+
+# This function is supposed to be the most appropriate for the canteen considered
+# and for many others. It is a sort of parabolic function, where the interarrival
+# is initially high, then decreases during the busy hours, and then increases again.
+# The user is obviusly allowed to implement its own function to provide to the source.
+arrivalFunction = lambda x: 0.0005 * (150.0 - x)**2 + 0.4
+
+
+
+
+
+
 def source (arrivalFunction : Callable[[float], float],
             maxtime : int,
             env : simpy.Environment,
@@ -59,7 +71,7 @@ def source (arrivalFunction : Callable[[float], float],
         hungry = random.randint (0, 5)
         menu = random.choice (_menu[hungry])
         speed = random.randint (0, 10)
-        customers.append(Customer(env, canteen, int(arrival), speed, hungry, menu))
+        customers.append(Customer(env, canteen, arrival, speed, hungry, menu))
 
         # Consider using += expovariate(1/arrivalFunction(arrival))
         # for a major variability and a more stochastic behaviour
@@ -95,7 +107,7 @@ class Customer (object):
     def __init__ (self,
                   env : simpy.Environment,
                   canteen : Canteen,
-                  arrival : int,
+                  arrival : float,
                   speed : int,
                   hungry : int,
                   menu : Tuple[int,...]
@@ -123,6 +135,16 @@ class Customer (object):
         self.menu = menu
 
         self.arrival = arrival
-        self.exit : Optional[int] = None
+        self.exit : Optional[float] = None
 
         self.history : List[logs.Event] = [logs.Event(arrival, "Arrive")]
+
+
+    @property
+    def speed_penalty (self) -> float:
+        """
+        The time penalty applied to the operations carried out by this customer
+        according to his/her speed.
+
+        """
+        return 0.3 - self.speed * 0.06
