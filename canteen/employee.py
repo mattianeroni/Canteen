@@ -13,7 +13,7 @@ from typing import Tuple
 
 
 
-def source (*experiences : int, env : simpy.Environment) -> Tuple[Employee,...]:
+def source (experiences : Tuple[int,...], env : simpy.Environment) -> Tuple[Employee,...]:
     """
     This method allows a faster generation of the employees who work in the canteen.
 
@@ -23,7 +23,7 @@ def source (*experiences : int, env : simpy.Environment) -> Tuple[Employee,...]:
     :return: The set of employee.
 
     """
-    return tuple(Employee(env, e, 100.0) for e in experiences)
+    return tuple(Employee(env, e, 100) for e in experiences)
 
 
 

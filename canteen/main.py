@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import simpy
 
 import canteen
@@ -18,7 +20,14 @@ if __name__ == '__main__':
     stations = (
         # Starters
         SelfServiceStation(env,
-                           supplier=ProductiveStation(),
+                           supplier=ProductiveStation(env,
+                                                      employees,
+                                                      products=(products.CAPRESE, products.COLDRICE, products.HAM),
+                                                      capacities=(3, 3, 3),
+                                                      production_times=(1.5, 1.5, 1.5),
+                                                      preparation_times=(3.0, 3.0, 3.0),
+                                                      keep=(True, True, True)
+                                                      ),
                            products=(products.CAPRESE, products.COLDRICE, products.HAM),
                            capacities=(3, 3, 3),
                            service_times=(1.5, 1.5, 1.5),
@@ -28,7 +37,14 @@ if __name__ == '__main__':
         # Pizza
         ServiceStation(env,
                        employees,
-                       supplier=ProductiveStation(),
+                       supplier=ProductiveStation(env,
+                                                  employees,
+                                                  products=(products.PIZZA, ),
+                                                  capacities=(1, ),
+                                                  production_times=(15.5, ),
+                                                  preparation_times=(10.0,),
+                                                  keep=(False, )
+                                                  ),
                        products=(products.PIZZA, ),
                        capacities=(1, ),
                        service_times=(2.5, ),
@@ -38,7 +54,14 @@ if __name__ == '__main__':
         # First
         ServiceStation(env,
                        employees,
-                       supplier=ProductiveStation(),
+                       supplier=ProductiveStation(env,
+                                                  employees,
+                                                  products=(products.CARBONARA, products.RAGU, products.RICE),
+                                                  capacities=(6, 6, 6),
+                                                  production_times=(1.5, 1.5, 1.5),
+                                                  preparation_times=(3.0, 3.0, 3.0),
+                                                  keep=(True, True, True)
+                                                  ),
                        products=(products.CARBONARA, products.RAGU, products.RICE),
                        capacities=(6, 6, 6),
                        service_times=(5.0, 5.0, 5.0),
@@ -48,7 +71,14 @@ if __name__ == '__main__':
         # Second
         ServiceStation(env,
                        employees,
-                       supplier=ProductiveStation(),
+                       supplier=ProductiveStation(env,
+                                                  employees,
+                                                  products=(products.MEET, products.FISH, products.ROAST),
+                                                  capacities=(10, 10, 10),
+                                                  production_times=(1.5, 1.5, 1.5),
+                                                  preparation_times=(3.0, 3.0, 3.0),
+                                                  keep=(True, True, True)
+                                                  ),
                        products=(products.MEET, products.FISH, products.ROAST),
                        capacities=(10, 10, 10),
                        service_times=(2.0, 2.0, 2.0),
@@ -57,7 +87,14 @@ if __name__ == '__main__':
                        ),
         # Side
         SelfServiceStation(env,
-                           supplier=ProductiveStation(),
+                           supplier=ProductiveStation(env,
+                                                      employees,
+                                                      products=(products.SALAD, products.MAIS, products.POTATOES),
+                                                      capacities=(3, 3, 3),
+                                                      production_times=(1.5, 1.5, 1.5),
+                                                      preparation_times=(3.0, 3.0, 3.0),
+                                                      keep=(True, True, True)
+                                                    ),
                            products=(products.SALAD, products.MAIS, products.POTATOES),
                            capacities=(3, 3, 3),
                            service_times=(6.0, 6.0, 6.0),
@@ -66,7 +103,14 @@ if __name__ == '__main__':
                            ),
         # Sweet
         SelfServiceStation(env,
-                           supplier=ProductiveStation(),
+                           supplier=ProductiveStation(env,
+                                                      employees,
+                                                      products=(products.YOGURT, products.CAKE, products.FRUIT),
+                                                      capacities=(10, 10, 10),
+                                                      production_times=(1.5, 1.5, 1.5),
+                                                      preparation_times=(3.0, 3.0, 3.0),
+                                                      keep=(True, True, True)
+                                                      ),
                            products=(products.YOGURT, products.CAKE, products.FRUIT),
                            capacities=(10, 10, 10),
                            service_times=(.5, .5, .5),
@@ -75,7 +119,14 @@ if __name__ == '__main__':
                            ),
         # Drink
         SelfServiceStation(env,
-                           supplier=ProductiveStation(),
+                           supplier=ProductiveStation(env,
+                                                      employees,
+                                                      products=(products.COKE, products.WATER, products.BEER),
+                                                      capacities=(30, 30, 30),
+                                                      production_times=(1.5, 1.5, 1.5),
+                                                      preparation_times=(3.0, 3.0, 3.0),
+                                                      keep=(True, True, True)
+                                                    ),
                            products=(products.COKE, products.WATER, products.BEER),
                            capacities=(30, 30, 30),
                            service_times=(.5, .5, .5),
@@ -89,5 +140,5 @@ if __name__ == '__main__':
     c = canteen.Canteen(env, employees, stations, SIM_TIME, capacity = 20)
     customers = customer.source ( customer.arrivalFunction, SIM_TIME, env, c )
 
-
+    env.process (canteen.simulation(env, c, customers))
     env.run(until=SIM_TIME)

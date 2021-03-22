@@ -15,7 +15,7 @@ import random
 from typing import Optional, Tuple, List, Callable
 
 import logs
-from canteen import Canteen
+#from canteen import Canteen
 
 
 # These are the possible menus the customers select from depending on
@@ -46,7 +46,7 @@ arrivalFunction = lambda x: 0.0005 * (150.0 - x)**2 + 0.4
 
 
 def source (arrivalFunction : Callable[[float], float],
-            maxtime : int,
+            maxtime : float,
             env : simpy.Environment,
             canteen : Canteen
 

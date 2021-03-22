@@ -80,7 +80,7 @@ class MultiStore (object):
 
         """
         c = self.containers[product]
-        return c.get(min(c.level, amount))
+        return c.get(amount) #min(c.level, amount))
 
 
 
@@ -154,16 +154,16 @@ class ResourceManager (object):
 
         """
         req : PriorityRequest
-        employee : Employee
+        emp : Employee
 
         if not self.current_request:
             # Make a request to all the employees
-            requests = [employee.request(priority=priority_level, preempt = False) for employee in self.employees]
+            requests = [e.request(priority=priority_level, preempt = False) for e in self.employees]
             # Wait for the first one to be free
             condition_value = yield self.env.any_of(requests)
             # Get the winner request and the relative employee
             req = condition_value.events[0]         # type: ignore
-            employee = req.resource                 # type: ignore
+            emp = req.resource                 # type: ignore
             self.current_request = req
             # Delete other requests
             # !NOTE! The winner is not cancelled because already triggered
@@ -171,7 +171,7 @@ class ResourceManager (object):
         else:
             # If an empoyee is already working in this station, wait for him/her to
             # be free, sending him an extraordinary request.
-            req = employee.request(priority=priority.EXTRAORDINARY, preempt = False)
+            req = self.current_request.resource.request(priority=priority.EXTRAORDINARY, preempt = False)
             yield req
             self.current_request = req
 
